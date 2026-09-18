@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="600" viewBox="0 0 900 600" role="img" aria-labelledby="title desc">
+<title>QuasarDNS Logo</title>
+<desc>Quasar burst with router signal waves - Warp Speed DNS</desc>
+<rect width="900" height="600" rx="24" fill="#0a0a1a"/>
+<!-- subtle stars -->
+<circle cx="120" cy="80" r="1.5" fill="white" opacity="0.6"/>
+<circle cx="780" cy="120" r="1.2" fill="white" opacity="0.5"/>
+<circle cx="650" cy="90" r="1" fill="white" opacity="0.4"/>
+<circle cx="200" cy="500" r="1.3" fill="white" opacity="0.5"/>
+<!-- quasar burst -->
+<g transform="translate(450,240)">
+  <!-- outer signal rings -->
+  <circle r="95" fill="none" stroke="#7c3aed" stroke-width="2" opacity="0.25"/>
+  <circle r="125" fill="none" stroke="#0ea5e9" stroke-width="2" opacity="0.18"/>
+  <circle r="155" fill="none" stroke="#22d3ee" stroke-width="1.5" opacity="0.12"/>
+  <!-- burst core -->
+  <radialGradient id="q" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(0,0) rotate(90) scale(70)">
+    <stop offset="0%" stop-color="#ffffff"/>
+    <stop offset="30%" stop-color="#c084fc"/>
+    <stop offset="65%" stop-color="#7c3aed"/>
+    <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0"/>
+  </radialGradient>
+  <circle r="70" fill="url(#q)"/>
+  <circle r="28" fill="white" opacity="0.95"/>
+  <circle r="14" fill="#0a0a1a" opacity="0.9"/>
+  <!-- cross flare -->
+  <path d="M -90 0 L 90 0 M 0 -90 L 0 90" stroke="white" stroke-width="1.2" opacity="0.15" stroke-linecap="round"/>
+</g>
+<!-- Text -->
+<text x="450" y="380" text-anchor="middle" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="72" font-weight="800" letter-spacing="3" fill="white">QuasarDNS</text>
+<text x="450" y="420" text-anchor="middle" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="22" font-weight="600" letter-spacing="6" fill="#22d3ee" opacity="0.9">WARP SPEED DNS</text>
+<text x="450" y="450" text-anchor="middle" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="400" letter-spacing="2" fill="white" opacity="0.45">FOR ASUSWRT-MERLIN</text>
+</svg>
