@@ -17,6 +17,7 @@ DNS4EU|86.54.11.100
 "
 
 TMP="/tmp/quasar_$$.log"
+trap 'rm -f "$TMP" "${TMP}.sorted" 2>/dev/null' EXIT INT TERM
 MODE="dry"
 [ "$1" = "--apply" ] && MODE="apply"
 [ "$1" = "--auto" ] && MODE="auto"
