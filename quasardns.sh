@@ -681,10 +681,17 @@ cmd_uninstall() {
 # Updates (own update function + amtm 'amtmupdate' support)
 ###############################################################################
 
+# Plain curl first: on Merlin 386.14_2 the bundled curl rejects --capath (rc 48),
+# so it is only used as a fallback for builds that need the CA path spelled out.
 fetch() { # url dest
-	_ca=""; [ -d /rom/etc/ssl/certs ] && _ca="--capath /rom/etc/ssl/certs"
+	_o="--retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60"
 	# shellcheck disable=SC2086
-	curl -fsL $_ca --retry 3 --retry-delay 2 --connect-timeout 10 --max-time 60 "$1" -o "$2" 2>/dev/null
+	curl -fsL $_o "$1" -o "$2" 2>/dev/null && return 0
+	if [ -d /rom/etc/ssl/certs ]; then
+		# shellcheck disable=SC2086
+		curl -fsL --capath /rom/etc/ssl/certs $_o "$1" -o "$2" 2>/dev/null && return 0
+	fi
+	return 1
 }
 
 ver_num() {
