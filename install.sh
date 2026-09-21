@@ -42,15 +42,19 @@ echo "Installed to $DEST"
 sh "$DEST" install || abort "setup failed"
 
 # optional: schedule the automatic check (only when a terminal is available)
-ans=n
-if [ -r /dev/tty ]; then
-	printf '\nEnable automatic checks (every 3 days at 04:00, applies only when clearly faster)? [y/N] '
-	{ read -r ans < /dev/tty; } 2>/dev/null || ans=n
+if grep -qs '^AUTO=enabled' "$JFFS_DIR/addons/quasardns.d/config"; then
+	echo "Automatic mode is already enabled: leaving it as it is."
+else
+	ans=n
+	if [ -r /dev/tty ]; then
+		printf '\nEnable automatic checks (every 3 days at 04:00, applies only when clearly faster)? [y/N] '
+		{ read -r ans < /dev/tty; } 2>/dev/null || ans=n
+	fi
+	case "$ans" in
+		y|Y) sh "$DEST" --enable ;;
+		*)   echo "Automatic mode is off. Turn it on any time from the menu (sh $DEST) or with: sh $DEST --enable" ;;
+	esac
 fi
-case "$ans" in
-	y|Y) sh "$DEST" --enable ;;
-	*)   echo "Automatic mode is off. Turn it on any time from the menu or with: quasardns --enable" ;;
-esac
 
 echo ""
 echo "Running a dry-run (no changes)..."
