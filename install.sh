@@ -21,10 +21,10 @@ if [ -f ./quasardns.sh ]; then
 	SRC=./quasardns.sh
 	echo "Using local ./quasardns.sh"
 else
-	command -v curl >/dev/null 2>&1 || abort "curl not found"
+	# no "command -v curl": on some BusyBox ash builds (Merlin 386.x) it fails to find external commands
 	echo "Downloading quasardns.sh..."
 	curl -fsL --retry 3 --connect-timeout 10 --max-time 60 "$REPO_RAW/quasardns.sh" -o "$TMP" \
-		|| abort "download failed"
+		|| abort "download failed (is curl available and the router online?)"
 	SRC="$TMP"
 fi
 

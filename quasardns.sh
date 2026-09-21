@@ -180,9 +180,14 @@ find_dig() {
 	for _d in /opt/bin/dig /opt/sbin/dig /usr/bin/dig /usr/sbin/dig /bin/dig; do
 		if [ -x "$_d" ]; then DIG="$_d"; return 0; fi
 	done
-	_d=$(command -v dig 2>/dev/null)
-	if [ -n "$_d" ] && [ -x "$_d" ]; then DIG="$_d"; return 0; fi
-	return 1
+	# Walk PATH by hand. "command -v" is not used: on the ash of some BusyBox builds
+	# (1.25.1 on Merlin 386.x) it fails to find external commands.
+	_ifs=$IFS; IFS=:
+	for _p in $PATH; do
+		if [ -x "$_p/dig" ]; then DIG="$_p/dig"; break; fi
+	done
+	IFS=$_ifs
+	[ -n "$DIG" ]
 }
 
 need_dig() {
