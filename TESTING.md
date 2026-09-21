@@ -33,6 +33,12 @@ v2.0.0 was checked with `shellcheck`, `sh -n` under dash and BusyBox ash, and a 
 - [ ] Set `MIN_GAIN_MS=0` and `MIN_GAIN_PCT=0` in the menu, run `quasardns --auto`, read `quasardns status`; restore the defaults afterwards
 - [ ] `quasardns --disable` removes the job
 
+## 6b. Under cron's own environment (important)
+cron runs jobs with a different environment than your SSH session (`LD_LIBRARY_PATH` points at the firmware libraries), and a script that works over SSH can still fail there. This was found on a real RT-AC86U: Entware's `grep` and `dig` broke with `relocation error` / `Bus error`.
+- [ ] Add a temporary job: `cru a qtest "* * * * * /jffs/scripts/quasardns --dry-run > /tmp/qtest.out 2>&1"`
+- [ ] After the next full minute: `cat /tmp/qtest.out` shows the normal ranking, with **no** `relocation error` and no `Bus error`
+- [ ] Remove it: `cru d qtest`
+
 ## 7. amtm / updates
 - [ ] `sh /jffs/scripts/quasardns amtmupdate check; echo $?` prints `0`
 - [ ] Publish a test version (e.g. bump `SCRIPT_VERSION` to `v2.0.1` on a branch and point `SCRIPT_REPO` at it), then `sh /jffs/scripts/quasardns amtmupdate` prints two lines and exits `0`

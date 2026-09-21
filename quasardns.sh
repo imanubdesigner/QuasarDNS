@@ -29,8 +29,10 @@ readonly CRON_ID="QuasarDNS"
 readonly LOCK_DIR="/tmp/$SCRIPT_NAME.lock"
 readonly TIMEOUT_PENALTY=5000
 
-# cron jobs run with a minimal PATH: make sure Entware (dig) is visible
-PATH="/opt/sbin:/opt/bin:$PATH:/usr/sbin:/sbin:/bin:/usr/bin"
+# Firmware tools FIRST, Entware last. Under cron/services LD_LIBRARY_PATH points at the
+# firmware libraries: Entware binaries (grep, date...) found first in PATH then fail with
+# "relocation error" and the script silently breaks. Only dig is taken from /opt (see dig_run).
+PATH="${QUASARDNS_SYSPATH:-/sbin:/bin:/usr/sbin:/usr/bin}:$PATH:/opt/sbin:/opt/bin"   # QUASARDNS_SYSPATH: testing only
 export PATH
 
 # Domains queried against every resolver (same idea as dnsspeedtest.online)
@@ -72,7 +74,8 @@ err()  { printf '%s[X]%s  %s\n' "$C_RED" "$C_NC" "$*" >&2; }
 
 log_msg() {
 	[ -d "$ADDON_DIR" ] || mkdir -p "$ADDON_DIR" 2>/dev/null
-	printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE" 2>/dev/null
+	_ts=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)
+	printf '%s %s\n' "${_ts:-????-??-?? ??:??:??}" "$*" >> "$LOG_FILE" 2>/dev/null
 }
 
 log_sys() {
@@ -178,17 +181,28 @@ valid_cron() {
 find_dig() {
 	DIG=""
 	for _d in /opt/bin/dig /opt/sbin/dig /usr/bin/dig /usr/sbin/dig /bin/dig; do
-		if [ -x "$_d" ]; then DIG="$_d"; return 0; fi
+		if [ -x "$_d" ]; then DIG="$_d"; break; fi
 	done
-	# Walk PATH by hand. "command -v" is not used: on the ash of some BusyBox builds
-	# (1.25.1 on Merlin 386.x) it fails to find external commands.
-	_ifs=$IFS; IFS=:
-	for _p in $PATH; do
-		if [ -x "$_p/dig" ]; then DIG="$_p/dig"; break; fi
-	done
-	IFS=$_ifs
-	[ -n "$DIG" ]
+	if [ -z "$DIG" ]; then
+		# Walk PATH by hand. "command -v" is not used: on the ash of some BusyBox builds
+		# (1.25.1 on Merlin 386.x) it fails to find external commands.
+		_ifs=$IFS; IFS=:
+		for _p in $PATH; do
+			if [ -x "$_p/dig" ]; then DIG="$_p/dig"; break; fi
+		done
+		IFS=$_ifs
+	fi
+	[ -n "$DIG" ] || return 1
+	# An Entware dig needs Entware's libraries. Under cron LD_LIBRARY_PATH holds the firmware's,
+	# and dig then dies with "relocation error" / "Bus error".
+	case "$DIG" in
+		/opt/*) DIG_LD="/opt/lib:/opt/usr/lib" ;;
+		*)      DIG_LD="$LD_LIBRARY_PATH" ;;
+	esac
+	return 0
 }
+
+dig_run() { LD_LIBRARY_PATH="$DIG_LD" "$DIG" "$@"; }
 
 need_dig() {
 	find_dig && return 0
@@ -243,7 +257,7 @@ get_current_dns() {
 local_resolves() {
 	_n=0
 	while [ "$_n" -lt 3 ]; do
-		[ -n "$("$DIG" -4 @127.0.0.1 google.com +time=3 +tries=1 +short 2>/dev/null)" ] && return 0
+		[ -n "$(dig_run -4 @127.0.0.1 google.com +time=3 +tries=1 +short 2>/dev/null)" ] && return 0
 		_n=$((_n+1)); sleep 2
 	done
 	return 1
@@ -263,7 +277,7 @@ bench_ip() {
 	_ok=0; _tot=0; _r=0
 	while [ "$_r" -lt "$SAMPLES" ]; do
 		for _h in $HOSTS; do
-			_out=$("$DIG" -4 "@$_ip" "$_h" +time=2 +tries=1 +stats 2>&1)
+			_out=$(dig_run -4 "@$_ip" "$_h" +time=2 +tries=1 +stats 2>&1)
 			_ms=$(printf '%s\n' "$_out" | awk '/Query time/ {print $4; exit}')
 			if printf '%s\n' "$_out" | grep -q "status: NOERROR" && [ -n "$_ms" ]; then
 				_ok=$((_ok+1))
@@ -536,7 +550,7 @@ EOF
 
 	# make sure the chosen servers really answer before touching anything
 	for _ip in "$NEW1" "$NEW2"; do
-		if [ -z "$("$DIG" -4 "@$_ip" google.com +time=2 +tries=2 +short 2>/dev/null)" ]; then
+		if [ -z "$(dig_run -4 "@$_ip" google.com +time=2 +tries=2 +short 2>/dev/null)" ]; then
 			err "$_ip does not resolve - aborting"
 			log_msg "$MODE: $_ip does not resolve - aborted"
 			return 1
