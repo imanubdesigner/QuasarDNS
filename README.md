@@ -8,7 +8,7 @@
 
 Inspired by [dnsspeedtest.online](https://dnsspeedtest.online) but built for routers. Runs directly on your **Asuswrt-Merlin** router, works with **amtm**, and plays nicely with Diversion & Skynet.
 
-![QuasarDNS](https://img.shields.io/badge/QuasarDNS-v2.0-7c3aed?style=for-the-badge&logo=starship&logoColor=white) ![Merlin](https://img.shields.io/badge/Merlin-386.x%20%7C%203006.x-0ea5e9?style=for-the-badge&logo=asus&logoColor=white) ![BusyBox](https://img.shields.io/badge/BusyBox-ash-ff6b35?style=for-the-badge&logo=gnubash&logoColor=white) ![License](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge&logo=opensourceinitiative&logoColor=white)
+![QuasarDNS](https://img.shields.io/badge/QuasarDNS-v3.0-7c3aed?style=for-the-badge&logo=starship&logoColor=white) ![Merlin](https://img.shields.io/badge/Merlin-386.x%20%7C%203006.x-0ea5e9?style=for-the-badge&logo=asus&logoColor=white) ![BusyBox](https://img.shields.io/badge/BusyBox-ash-ff6b35?style=for-the-badge&logo=gnubash&logoColor=white) ![License](https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge&logo=opensourceinitiative&logoColor=white)
 
 ### Why Quasar?
 

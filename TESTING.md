@@ -34,9 +34,9 @@ v3.0.0 was checked with `sh -n`, with unit tests of the timer (uptime fractions,
 - [ ] `quasardns --disable` removes the job
 
 ## 6b. Under cron's own environment (important)
-cron runs jobs with a different environment than your SSH session (`LD_LIBRARY_PATH` points at the firmware libraries), and a script that works over SSH can still fail there. This was found on a real RT-AC86U: Entware's `grep` broke with `relocation error` / `Bus error` when it came first in `PATH`.
-- [ ] Add a temporary job: `cru a qtest "* * * * * /jffs/scripts/quasardns --dry-run > /tmp/qtest.out 2>&1"`
-- [ ] After the next full minute: `cat /tmp/qtest.out` shows the normal ranking, with **no** `relocation error` and no `Bus error`
+cron runs jobs with a different environment than your SSH session (`PATH` and `LD_LIBRARY_PATH` point at the firmware), and a script that works over SSH can still fail there. This was found on a real RT-AC86U: Entware's `grep` broke with `relocation error` / `Bus error` when it came first in `PATH`.
+- [ ] Read the current minute with `date +%M`, then schedule a **single** run two minutes later (a full benchmark takes ~2 minutes, so `* * * * *` would overlap with itself): `cru a qtest "47 13 * * * /jffs/scripts/quasardns --dry-run > /tmp/qtest.out 2>&1"` (use your own minute/hour)
+- [ ] After that minute plus ~3 minutes: `cat /tmp/qtest.out` shows the normal ranking, with **no** `relocation error`, no `Bus error` and no `arithmetic syntax error`
 - [ ] Remove it: `cru d qtest`
 
 ## 7. amtm / updates
