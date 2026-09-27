@@ -1,6 +1,6 @@
 # Testing QuasarDNS on a real router
 
-v2.0.0 was checked with `shellcheck`, `sh -n` under dash and BusyBox ash, and a simulated router (stubbed `nvram`, `dig`, `cru`, ...). The items below can only be verified on hardware. Run them over SSH, in order. Tick each one.
+v3.0.0 was checked with `sh -n`, with unit tests of the timer (uptime fractions, bad reads), and with a full dry-run on a real RT-AC86U running Merlin 386.14_2 / BusyBox 1.25.1 (no kernel log spam, empty stderr). The items below can only be verified on hardware. Run them over SSH, in order. Tick each one.
 
 ## 1. Install
 - [ ] `sh install.sh` finishes without errors; `/jffs/scripts/quasardns` and `/jffs/addons/quasardns.d/config` exist
@@ -34,7 +34,7 @@ v2.0.0 was checked with `shellcheck`, `sh -n` under dash and BusyBox ash, and a 
 - [ ] `quasardns --disable` removes the job
 
 ## 6b. Under cron's own environment (important)
-cron runs jobs with a different environment than your SSH session (`LD_LIBRARY_PATH` points at the firmware libraries), and a script that works over SSH can still fail there. This was found on a real RT-AC86U: Entware's `grep` and `dig` broke with `relocation error` / `Bus error`.
+cron runs jobs with a different environment than your SSH session (`LD_LIBRARY_PATH` points at the firmware libraries), and a script that works over SSH can still fail there. This was found on a real RT-AC86U: Entware's `grep` broke with `relocation error` / `Bus error` when it came first in `PATH`.
 - [ ] Add a temporary job: `cru a qtest "* * * * * /jffs/scripts/quasardns --dry-run > /tmp/qtest.out 2>&1"`
 - [ ] After the next full minute: `cat /tmp/qtest.out` shows the normal ranking, with **no** `relocation error` and no `Bus error`
 - [ ] Remove it: `cru d qtest`

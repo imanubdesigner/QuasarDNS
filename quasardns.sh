@@ -4,13 +4,13 @@
 # https://github.com/imanubdesigner/QuasarDNS
 #
 # Add-on for Asuswrt-Merlin, amtm-ready. POSIX sh / BusyBox ash.
-# Requires: dig  (Entware: opkg install bind-dig)
+# Requires: nothing beyond the stock firmware (BusyBox nslookup + date).
 #
 # License: MIT
 #
 
 readonly SCRIPT_NAME="quasardns"
-readonly SCRIPT_VERSION="v2.0.0"
+readonly SCRIPT_VERSION="v3.0.0"
 readonly SCRIPT_TITLE="QuasarDNS"
 readonly SCRIPT_REPO="https://raw.githubusercontent.com/imanubdesigner/QuasarDNS/master"
 readonly SCRIPT_URL="$SCRIPT_REPO/quasardns.sh"
@@ -31,7 +31,8 @@ readonly TIMEOUT_PENALTY=5000
 
 # Firmware tools FIRST, Entware last. Under cron/services LD_LIBRARY_PATH points at the
 # firmware libraries: Entware binaries (grep, date...) found first in PATH then fail with
-# "relocation error" and the script silently breaks. Only dig is taken from /opt (see dig_run).
+# "relocation error" and the script silently breaks. Everything the script needs ships with
+# the firmware (BusyBox); /opt is only appended for optional extras.
 PATH="${QUASARDNS_SYSPATH:-/sbin:/bin:/usr/sbin:/usr/bin}:$PATH:/opt/sbin:/opt/bin"   # QUASARDNS_SYSPATH: testing only
 export PATH
 
@@ -175,40 +176,14 @@ valid_cron() {
 # Environment checks
 ###############################################################################
 
-# Locate dig: known Entware/system paths first, then whatever the shell finds.
-# Sets DIG (full path). Not relying on PATH alone: some BusyBox builds and
-# cron environments do not resolve /opt/bin reliably.
-find_dig() {
-	DIG=""
-	for _d in /opt/bin/dig /opt/sbin/dig /usr/bin/dig /usr/sbin/dig /bin/dig; do
-		if [ -x "$_d" ]; then DIG="$_d"; break; fi
-	done
-	if [ -z "$DIG" ]; then
-		# Walk PATH by hand. "command -v" is not used: on the ash of some BusyBox builds
-		# (1.25.1 on Merlin 386.x) it fails to find external commands.
-		_ifs=$IFS; IFS=:
-		for _p in $PATH; do
-			if [ -x "$_p/dig" ]; then DIG="$_p/dig"; break; fi
-		done
-		IFS=$_ifs
-	fi
-	[ -n "$DIG" ] || return 1
-	# An Entware dig needs Entware's libraries. Under cron LD_LIBRARY_PATH holds the firmware's,
-	# and dig then dies with "relocation error" / "Bus error".
-	case "$DIG" in
-		/opt/*) DIG_LD="/opt/lib:/opt/usr/lib" ;;
-		*)      DIG_LD="$LD_LIBRARY_PATH" ;;
-	esac
-	return 0
-}
+# ns_run <args...>: stock nslookup with a cap on how long a dead resolver can
+# stall the run (RES_OPTIONS is read by the resolver behind BusyBox nslookup:
+# timeout:1 attempts:1 gives ~3 s per dead query instead of ~60 s).
+ns_run() { RES_OPTIONS="timeout:1 attempts:1" nslookup "$@"; }
 
-dig_run() { LD_LIBRARY_PATH="$DIG_LD" "$DIG" "$@"; }
-
-need_dig() {
-	find_dig && return 0
-	err "'dig' not found (looked in /opt/bin, /opt/sbin, /usr/bin, /usr/sbin, /bin and PATH)."
-	err "Install it with:  opkg update && opkg install bind-dig"
-	err "(Entware is required - install it from amtm with the 'ep' option)"
+need_nslookup() {
+	nslookup 2>&1 | grep -q "^Usage: nslookup" && return 0
+	err "'nslookup' not found: it ships with the stock BusyBox firmware."
 	return 1
 }
 
@@ -257,7 +232,7 @@ get_current_dns() {
 local_resolves() {
 	_n=0
 	while [ "$_n" -lt 3 ]; do
-		[ -n "$(dig_run -4 @127.0.0.1 google.com +time=3 +tries=1 +short 2>/dev/null)" ] && return 0
+		ns_run google.com 127.0.0.1 >/dev/null 2>&1 && return 0
 		_n=$((_n+1)); sleep 2
 	done
 	return 1
@@ -267,25 +242,75 @@ local_resolves() {
 # Benchmark
 ###############################################################################
 
+# now_ms: timestamp in milliseconds for the query timer. Prefers date +%s%N
+# (1 ms) when the firmware date knows %N, otherwise falls back to
+# /proc/uptime (10 ms, parsed with builtins only).
+now_ms() {
+	_n=$(date +%s%N 2>/dev/null)
+	case "$_n" in
+		[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]*)
+			echo $((_n / 1000000))
+			return 0 ;;
+	esac
+	# /proc/uptime fallback (BusyBox date has no %N). The read occasionally
+	# comes back empty on this firmware: validate before doing arithmetic,
+	# retry a few times, and never emit a number we cannot trust.
+	_i=0
+	while [ "$_i" -lt 3 ]; do
+		_u=""; _ok=0
+		if read -r _u _rest < /proc/uptime; then
+			case "$_u" in
+				*[!0-9.]*|*.*.*) ;;
+				*.*)	_h=${_u%%.*}; _f=${_u#*.}
+					case "$_h" in ''|*[!0-9]*) ;; *)
+						case "$_f" in ''|*[!0-9]*) ;; *) _ok=1 ;; esac
+					esac ;;
+				*)	;;
+			esac
+		fi
+		if [ "$_ok" = "1" ]; then
+			# busybox ash reads a leading 0 as octal: an uptime fraction of
+			# 08 or 09 (about 2 % of the calls) made this arithmetic fail.
+			while :; do case "$_h" in 0[0-9]*) _h=${_h#0} ;; *) break ;; esac; done
+			while :; do case "$_f" in 0[0-9]*) _f=${_f#0} ;; *) break ;; esac; done
+			echo $(( (_h * 100 + _f) * 10 ))
+			return 0
+		fi
+		_i=$((_i+1))
+	done
+	return 1
+}
+
 # bench_ip <ip>  ->  sets BENCH_MS (score in ms), BENCH_OK and BENCH_TOT
 # Score = mean of the samples after dropping the slowest 20 % (outliers such as
 # a cold-cache miss). A mean is used instead of a median on purpose: on some
-# routers dig reports times in 10 ms steps (19, 29, 39...), and a median would
-# snap two equally fast resolvers to different steps.
+# routers the timer only ticks in 10 ms steps (19, 29, 39...), and a median
+# would snap two equally fast resolvers to different steps. Three consecutive
+# failures mean the resolver is dead: stop asking, it already scored the penalty.
 bench_ip() {
 	_ip="$1"; _tmp="$TMP_DIR/samples"; : > "$_tmp"
-	_ok=0; _tot=0; _r=0
-	while [ "$_r" -lt "$SAMPLES" ]; do
+	_ok=0; _tot=0; _r=0; _dead=0
+	while [ "$_r" -lt "$SAMPLES" ] && [ "$_dead" = "0" ]; do
 		for _h in $HOSTS; do
-			_out=$(dig_run -4 "@$_ip" "$_h" +time=2 +tries=1 +stats 2>&1)
-			_ms=$(printf '%s\n' "$_out" | awk '/Query time/ {print $4; exit}')
-			if printf '%s\n' "$_out" | grep -q "status: NOERROR" && [ -n "$_ms" ]; then
+			_t0=$(now_ms)
+			ns_run "$_h" "$_ip" >/dev/null 2>&1
+			_rc=$?
+			if [ "$_rc" = "0" ]; then
 				_ok=$((_ok+1))
+				_dead=0
+				_t1=$(now_ms)
+				if [ -n "$_t0" ] && [ -n "$_t1" ]; then
+					_ms=$((_t1 - _t0))
+					[ "$_ms" -lt 0 ] && _ms=0
+					echo "$_ms" >> "$_tmp"
+					_tot=$((_tot+1))
+				fi
 			else
-				_ms=$TIMEOUT_PENALTY
+				echo "$TIMEOUT_PENALTY" >> "$_tmp"
+				_dead=$((_dead+1))
+				_tot=$((_tot+1))
 			fi
-			echo "$_ms" >> "$_tmp"
-			_tot=$((_tot+1))
+			[ "$_dead" -ge 3 ] && break
 		done
 		_r=$((_r+1))
 	done
@@ -316,7 +341,7 @@ coarse_timer_note() {
 	[ -s "$TMP_DIR/all_samples" ] || return 0
 	if awk '$1<5000 {n++; r=$1%10; if (n==1) f=r; else if (r!=f) d=1} END{exit (n>=10 && !d) ? 0 : 1}' "$TMP_DIR/all_samples"; then
 		echo ""
-		info "[i] dig reports times in 10 ms steps on this router: each score is an average over"
+		info "[i] query times only move in 10 ms steps on this router: each score is an average over"
 		info "    $((SAMPLES*3)) queries per resolver, so differences of a few ms are meaningful, single values are not."
 	fi
 }
@@ -451,7 +476,7 @@ diversion_probe() {
 cmd_run() {
 	MODE="$1"; FORCE="$2"; QUIET=0
 	[ "$MODE" = "auto" ] && QUIET=1
-	need_dig || return 1
+	need_nslookup || return 1
 	lock_acquire || { err "Another $SCRIPT_TITLE run is already in progress"; return 1; }
 	mkdir -p "$TMP_DIR"; rotate_log
 
@@ -550,7 +575,7 @@ EOF
 
 	# make sure the chosen servers really answer before touching anything
 	for _ip in "$NEW1" "$NEW2"; do
-		if [ -z "$(dig_run -4 "@$_ip" google.com +time=2 +tries=2 +short 2>/dev/null)" ]; then
+		if ! ns_run google.com "$_ip" >/dev/null 2>&1; then
 			err "$_ip does not resolve - aborting"
 			log_msg "$MODE: $_ip does not resolve - aborted"
 			return 1
@@ -663,17 +688,7 @@ cmd_install() {
 		warn "(Enable JFFS custom scripts and configs = Yes), then reboot."
 	fi
 	cfg_init
-	if ! find_dig; then
-		if [ -x /opt/bin/opkg ]; then
-			info "Installing bind-dig via Entware..."
-			/opt/bin/opkg update >/dev/null 2>&1
-			/opt/bin/opkg install bind-dig || { err "Could not install bind-dig"; return 1; }
-			find_dig || { err "bind-dig was installed but 'dig' still cannot be found"; return 1; }
-		else
-			err "Entware is required (amtm > 'ep'), then: opkg install bind-dig"
-			return 1
-		fi
-	fi
+	need_nslookup || return 1
 	migrate_legacy
 	hook_add
 	[ "$(cfg_get AUTO disabled)" = "enabled" ] && cron_add

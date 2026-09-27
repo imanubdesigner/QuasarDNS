@@ -38,7 +38,7 @@ mv -f "$DEST.new" "$DEST" || abort "cannot write $DEST"
 rm -f "$TMP"
 echo "Installed to $DEST"
 
-# dependencies (bind-dig), hooks, migration from v1.x
+# checks, hooks, migration from v1.x
 sh "$DEST" install || abort "setup failed"
 
 # optional: schedule the automatic check (only when a terminal is available)
