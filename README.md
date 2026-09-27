@@ -67,6 +67,12 @@ quasardns uninstall
 
 `/jffs/scripts` is not in the router's `PATH`: run these as `sh /jffs/scripts/quasardns <command>`.
 
+### Menu
+
+Running it with no arguments opens the menu — it shows the DNS you are using right now and the state of the automatic mode:
+
+![QuasarDNS menu](menu.png)
+
 ### Example output
 
 ```
