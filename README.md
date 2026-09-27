@@ -17,7 +17,7 @@ A quasar is the brightest, most energetic object in the universe — like the fa
 ### Features
 
 - **Real benchmark** — 7 public resolvers × 3 popular domains × 5 rounds, measured with the stock `nslookup` (wall-clock of the query); **both IPs of each resolver are tested and the better score is kept** (some networks block `1.1.1.1`); the score is the **mean after dropping the slowest 20 %**, failed queries get a `5000 ms` penalty
-- **Never changes the kind of DNS you use** — resolvers are grouped as `plain`, `security` (malware/phishing blocking) or `ads`; in `auto` mode only resolvers of the same group as your current DNS are considered, so your filtering is never silently added or removed
+- **Never changes the kind of DNS you use** — resolvers are grouped as `plain`, `security` (malware/phishing blocking) or `ads`; in `auto` mode only resolvers of the same group as your current DNS are considered, so your filtering is never silently added or removed (see [Resolver profiles](#resolver-profiles))
 - **Safe by design** — refuses to run when it would have no effect or conflict: DNS-over-TLS, Unbound, AdGuardHome, dnscrypt-proxy (override with `--force`); verifies the new servers answer *before* applying; verifies the router still resolves *after* applying and **rolls back automatically** if not
 - **Auto mode** — cron job (default: every 3 days at 04:00) that applies changes only when the gain is `>= 5 ms` **and** `>= 15 %` (no flapping); never takes over DNS that is provided by your ISP
 - **One-step rollback** — `quasardns --rollback` restores the previous settings; changes take effect immediately, without restarting the WAN
@@ -103,7 +103,7 @@ DRY-RUN current: 8.8.8.8 8.8.4.4 -> best: 45.90.28.0 8.8.8.8 (NextDNS 170ms)
 Use --apply to apply or --auto for cron
 ```
 
-Only the resolvers of the selected profile are ranked (here `plain`, the group of your current DNS); the others are still measured and listed above. Cloudflare shows `1.0.0.1` because `1.1.1.1` is unreachable from that network — that is the both-IPs rule at work. Your own numbers depend on your line.
+Only the resolvers of the selected profile are ranked (here `plain`, the group of your current DNS — see [Resolver profiles](#resolver-profiles)); the others are still measured and listed above. Cloudflare shows `1.0.0.1` because `1.1.1.1` is unreachable from that network — that is the both-IPs rule at work. Your own numbers depend on your line.
 
 ### Settings
 
@@ -118,6 +118,20 @@ Stored in `/jffs/addons/quasardns.d/config` (edit from the menu → *Settings*):
 | `AUTO` | `disabled` | Whether the cron job is scheduled |
 | `SCHEDULE` | `0 4 */3 * *` | Cron expression for `--auto` |
 | `AMTMUPDATE` | `enabled` | Let amtm update this add-on |
+
+### Resolver profiles
+
+Resolvers are grouped by what they block, and only members of the selected profile compete in the ranking (the others are still measured, just not eligible):
+
+| Profile | Blocks | Examples |
+| --- | --- | --- |
+| `plain` | nothing — resolves every domain | Cloudflare, Google, NextDNS, DNS4EU |
+| `security` | known-bad domains: malware, phishing, cryptomining | Quad9, OpenDNS |
+| `ads` | ads and trackers, on top of the malware blocking | AdGuard |
+
+- `PROFILE` = `auto` (the default) follows what you use today: with a `plain` current DNS only `plain` resolvers are ranked, so QuasarDNS never adds or removes filtering behind your back.
+- To let another group compete, change it from the menu: **`5) Settings` → `1) Resolver profile`** and type `security`, `ads` or `all` (one mixed ranking with every resolver).
+- Applying a filtering profile switches DNS for **every device on the network at once** (PCs, phones, TVs, IoT) with nothing to install on them. The trade-off is the occasional false positive: a domain the provider considers malicious simply will not open. `quasardns --rollback` puts the previous servers back immediately.
 
 ### How it works
 
