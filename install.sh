@@ -57,7 +57,7 @@ else
 fi
 
 echo ""
-echo "Running a dry-run (no changes)..."
+echo "Running a dry-run (no changes, about 2 minutes)..."
 sh "$DEST" --dry-run
 
 echo ""
