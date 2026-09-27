@@ -75,29 +75,35 @@ Running it with no arguments opens the menu — it shows the DNS you are using r
 
 ### Example output
 
+Real `--dry-run` output from the test router (an RT-AC86U, `samples: 5`):
+
 ```
-=== QuasarDNS SpeedTest (Sun Sep 20 13:37:59 UTC 2026) ===
+=== QuasarDNS SpeedTest (Sun Sep 27 12:51:00 DST 2026) ===
 Hosts: google.com youtube.com wikipedia.org  |  samples: 5  |  resolvers: plain (same type as your current DNS)
 
-Cloudflare      1.1.1.1           25 ms (15/15 ok) [plain]
-Google          8.8.8.8           12 ms (15/15 ok) [plain]
-NextDNS         45.90.28.0        30 ms (15/15 ok) [plain]
-DNS4EU          86.54.11.100      40 ms (15/15 ok) [plain]
-Quad9           9.9.9.9           15 ms (15/15 ok) [security]
-OpenDNS         208.67.222.222    60 ms (15/15 ok) [security]
-AdGuard         94.140.14.14      20 ms (15/15 ok) [ads]
+Cloudflare      1.0.0.1          209 ms (15/15 ok) [plain]
+Google          8.8.8.8          179 ms (15/15 ok) [plain]
+NextDNS         45.90.28.0       170 ms (15/15 ok) [plain]
+DNS4EU          86.54.11.200     211 ms (15/15 ok) [plain]
+Quad9           149.112.112.112  163 ms (15/15 ok) [security]
+OpenDNS         208.67.222.222   154 ms (15/15 ok) [security]
+AdGuard         94.140.15.15     278 ms (15/15 ok) [ads]
+
+[i] query times only move in 10 ms steps on this router: each score is an average over
+    15 queries per resolver, so differences of a few ms are meaningful, single values are not.
 
 --- Ranking (fastest -> slowest) ---
-1 12 ms Google 8.8.8.8 (15/15 ok)
-2 25 ms Cloudflare 1.1.1.1 (15/15 ok)
-3 30 ms NextDNS 45.90.28.0 (15/15 ok)
-4 40 ms DNS4EU 86.54.11.100 (15/15 ok)
+1 170 ms NextDNS 45.90.28.0 (15/15 ok)
+2 179 ms Google 8.8.8.8 (15/15 ok)
+3 209 ms Cloudflare 1.0.0.1 (15/15 ok)
+4 211 ms DNS4EU 86.54.11.200 (15/15 ok)
 
-Current: 1.1.1.1 1.0.0.1 -> 25 ms
-DRY-RUN current: 1.1.1.1 1.0.0.1 -> best: 8.8.8.8 1.1.1.1 (Google 12ms)
+Current: 8.8.8.8 8.8.4.4 -> 158 ms
+DRY-RUN current: 8.8.8.8 8.8.4.4 -> best: 45.90.28.0 8.8.8.8 (NextDNS 170ms)
+Use --apply to apply or --auto for cron
 ```
 
-*(Illustrative numbers.)*
+Only the resolvers of the selected profile are ranked (here `plain`, the group of your current DNS); the others are still measured and listed above. Cloudflare shows `1.0.0.1` because `1.1.1.1` is unreachable from that network — that is the both-IPs rule at work. Your own numbers depend on your line.
 
 ### Settings
 
