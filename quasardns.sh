@@ -350,9 +350,19 @@ run_benchmark() {
 	RESULTS="$TMP_DIR/results"; POOL="$TMP_DIR/pool"; : > "$RESULTS"
 	printf '%s\n' "$SERVERS" | while IFS='|' read -r _n _c _i1 _i2; do
 		[ -z "$_n" ] && continue
+		# Both IPs are tested: a network may block just one of them (some ISPs
+		# do block 1.1.1.1). The score is the better of the two and that IP is
+		# written first, so it becomes the primary server dnsmasq is given.
 		bench_ip "$_i1"
-		echo "$BENCH_MS $_n $_i1 $_i2 $_c $BENCH_OK $BENCH_TOT" >> "$RESULTS"
-		[ "$QUIET" = "1" ] || printf '%-15s %-15s %4d ms (%d/%d ok) [%s]\n' "$_n" "$_i1" "$BENCH_MS" "$BENCH_OK" "$BENCH_TOT" "$_c"
+		_best=$BENCH_MS; _win=$_i1; _wok=$BENCH_OK; _wtot=$BENCH_TOT; _alt=$_i2
+		if [ -n "$_i2" ]; then
+			bench_ip "$_i2"
+			if [ "$BENCH_MS" -lt "$_best" ]; then
+				_best=$BENCH_MS; _win=$_i2; _wok=$BENCH_OK; _wtot=$BENCH_TOT; _alt=$_i1
+			fi
+		fi
+		echo "$_best $_n $_win $_alt $_c $_wok $_wtot" >> "$RESULTS"
+		[ "$QUIET" = "1" ] || printf '%-15s %-15s %4d ms (%d/%d ok) [%s]\n' "$_n" "$_win" "$_best" "$_wok" "$_wtot" "$_c"
 	done
 	awk -v p="$PROFILE_USED" '($5==p || p=="all") && ($6*3 >= $7*2)' "$RESULTS" | sort -n > "$POOL"
 }

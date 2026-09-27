@@ -16,7 +16,7 @@ A quasar is the brightest, most energetic object in the universe — like the fa
 
 ### Features
 
-- **Real benchmark** — 7 public resolvers × 3 popular domains × 5 rounds, measured with the stock `nslookup` (wall-clock of the query); the score is the **mean after dropping the slowest 20 %**, failed queries get a `5000 ms` penalty
+- **Real benchmark** — 7 public resolvers × 3 popular domains × 5 rounds, measured with the stock `nslookup` (wall-clock of the query); **both IPs of each resolver are tested and the better score is kept** (some networks block `1.1.1.1`); the score is the **mean after dropping the slowest 20 %**, failed queries get a `5000 ms` penalty
 - **Never changes the kind of DNS you use** — resolvers are grouped as `plain`, `security` (malware/phishing blocking) or `ads`; in `auto` mode only resolvers of the same group as your current DNS are considered, so your filtering is never silently added or removed
 - **Safe by design** — refuses to run when it would have no effect or conflict: DNS-over-TLS, Unbound, AdGuardHome, dnscrypt-proxy (override with `--force`); verifies the new servers answer *before* applying; verifies the router still resolves *after* applying and **rolls back automatically** if not
 - **Auto mode** — cron job (default: every 3 days at 04:00) that applies changes only when the gain is `>= 5 ms` **and** `>= 15 %` (no flapping); never takes over DNS that is provided by your ISP
@@ -109,7 +109,7 @@ Stored in `/jffs/addons/quasardns.d/config` (edit from the menu → *Settings*):
 
 ### How it works
 
-Each resolver is queried for `google.com`, `youtube.com` and `wikipedia.org` (`SAMPLES` rounds) over plain UDP/53 with the stock `nslookup`, exactly what `dnsmasq` uses upstream. The score is the mean elapsed query time after dropping the slowest 20 % of the samples; queries that fail count as `5000 ms`, and resolvers that fail more than a third of their queries are discarded.
+Each resolver is queried for `google.com`, `youtube.com` and `wikipedia.org` (`SAMPLES` rounds) over plain UDP/53 with the stock `nslookup`, exactly what `dnsmasq` uses upstream. Both IPs of the resolver are benchmarked and the better one becomes the primary server written to the config — this way a resolver is not penalised because your network blocks one of its addresses. The score is the mean elapsed query time after dropping the slowest 20 % of the samples; queries that fail count as `5000 ms`, and resolvers that fail more than a third of their queries are discarded.
 
 On some routers the timer only moves in 10 ms steps (19, 29, 39 ms...). That is why the score is a mean over many queries and not a median or a single query: it stays reliable to a few milliseconds even with a coarse timer, and QuasarDNS tells you when it detects this.
 
