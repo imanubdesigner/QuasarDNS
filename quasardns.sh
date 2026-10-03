@@ -4,13 +4,16 @@
 # https://github.com/imanubdesigner/QuasarDNS
 #
 # Add-on for Asuswrt-Merlin, amtm-ready. POSIX sh / BusyBox ash.
-# Requires: nothing beyond the stock firmware (BusyBox nslookup + date).
+#
+# Measures with Entware's drill when available (it reports the DNS query time
+# itself, at 1 ms resolution) and falls back to the stock BusyBox nslookup
+# otherwise, which still works but only ticks in 10 ms steps.
 #
 # License: MIT
 #
 
 readonly SCRIPT_NAME="quasardns"
-readonly SCRIPT_VERSION="v3.0.0"
+readonly SCRIPT_VERSION="v3.1.1"
 readonly SCRIPT_TITLE="QuasarDNS"
 readonly SCRIPT_REPO="https://raw.githubusercontent.com/imanubdesigner/QuasarDNS/master"
 readonly SCRIPT_URL="$SCRIPT_REPO/quasardns.sh"
@@ -176,15 +179,78 @@ valid_cron() {
 # Environment checks
 ###############################################################################
 
-# ns_run <args...>: stock nslookup with a cap on how long a dead resolver can
-# stall the run (RES_OPTIONS is read by the resolver behind BusyBox nslookup:
-# timeout:1 attempts:1 gives ~3 s per dead query instead of ~60 s).
-ns_run() { RES_OPTIONS="timeout:1 attempts:1" nslookup "$@"; }
+# How to query, and how precisely.
+#
+# drill (Entware) is strongly preferred:
+#   * it reports the query time itself (";; Query time: N msec"), measured inside
+#     ldns at 1 ms resolution, so the number is not quantised;
+#   * it sends one query per lookup.
+# BusyBox nslookup reports no timing at all, so the only way to measure it is to
+# wrap the whole process in a clock - and the only clock available here ticks in
+# 10 ms steps (see now_ms). On top of that nslookup issues queries of its own: it
+# resolves the server name in order to print "Address 1: <ip> <name>", and those
+# extra queries go to the very resolver under test. That cost is proportional to
+# the resolver's latency, not a fixed offset, so with nslookup the score is
+# dominated by nslookup's own overhead and the ranking comes out wrong.
+#
+# drill has no timeout of its own and ignores RES_OPTIONS, hence the external
+# timeout: against an unreachable resolver it would otherwise stall ~15 s a query
+# instead of the ~3 s we cap it to.
+#
+# Without Entware the script still runs, just with coarser measurements.
+DNS_TOOL=nslookup
+Q_MS=""
+DRILL_BIN="${QUASARDNS_DRILL:-/opt/bin/drill}"        # QUASARDNS_DRILL: testing only
+TIMEOUT_BIN="${QUASARDNS_TIMEOUT:-/opt/bin/timeout}" # QUASARDNS_TIMEOUT: testing only
+QUERY_TIMEOUT=3
 
-need_nslookup() {
+# pick_dns_tool: decide how to query. Sets DNS_TOOL.
+pick_dns_tool() {
+	if [ -x "$DRILL_BIN" ] && [ -x "$TIMEOUT_BIN" ]; then
+		DNS_TOOL=drill
+		return 0
+	fi
+	DNS_TOOL=nslookup
 	nslookup 2>&1 | grep -q "^Usage: nslookup" && return 0
 	err "'nslookup' not found: it ships with the stock BusyBox firmware."
 	return 1
+}
+
+# What the next measurement will actually use, spelled out. Same test as
+# pick_dns_tool, but silent and side-effect free: the menu has to show this
+# without announcing it twice or touching DNS_TOOL, which is only set once a
+# run starts. Without it the user cannot tell a 1 ms reading from a 10 ms one.
+measure_label() {
+	if [ -x "$DRILL_BIN" ] && [ -x "$TIMEOUT_BIN" ]; then
+		printf 'drill, 1 ms resolution'
+	else
+		printf 'nslookup, 10 ms clock (coarse)'
+	fi
+}
+
+# dns_query <host> <ip>: one A lookup. Sets Q_MS to the query time in
+# milliseconds, or clears it and returns 1 when the lookup failed. A fast
+# failure (NXDOMAIN, SERVFAIL) counts as a failure, never as a fast success.
+dns_query() {
+	if [ "$DNS_TOOL" = "drill" ]; then
+		_out=$("$TIMEOUT_BIN" "$QUERY_TIMEOUT" "$DRILL_BIN" "$1" "@$2" 2>/dev/null)
+		case "$_out" in
+			*"rcode: NOERROR"*"ANSWER SECTION"*) ;;
+			*) Q_MS=""; return 1 ;;
+		esac
+		Q_MS=$(printf '%s\n' "$_out" | awk '/^;; Query time:/ {print $4; exit}')
+		[ -n "$Q_MS" ] || { Q_MS=""; return 1; }
+		return 0
+	fi
+	_t0=$(now_ms)
+	RES_OPTIONS="timeout:1 attempts:1" nslookup "$1" "$2" >/dev/null 2>&1
+	_rc=$?
+	_t1=$(now_ms)
+	[ "$_rc" = "0" ] || { Q_MS=""; return 1; }
+	[ -n "$_t0" ] && [ -n "$_t1" ] || { Q_MS=""; return 1; }
+	Q_MS=$((_t1 - _t0))
+	[ "$Q_MS" -lt 0 ] && Q_MS=0
+	return 0
 }
 
 is_running() { pidof "$1" >/dev/null 2>&1; }
@@ -232,7 +298,7 @@ get_current_dns() {
 local_resolves() {
 	_n=0
 	while [ "$_n" -lt 3 ]; do
-		ns_run google.com 127.0.0.1 >/dev/null 2>&1 && return 0
+		dns_query google.com 127.0.0.1 && return 0
 		_n=$((_n+1)); sleep 2
 	done
 	return 1
@@ -282,34 +348,23 @@ now_ms() {
 }
 
 # bench_ip <ip>  ->  sets BENCH_MS (score in ms), BENCH_OK and BENCH_TOT
-# Score = mean of the samples after dropping the slowest 20 % (outliers such as
-# a cold-cache miss). A mean is used instead of a median on purpose: on some
-# routers the timer only ticks in 10 ms steps (19, 29, 39...), and a median
-# would snap two equally fast resolvers to different steps. Three consecutive
-# failures mean the resolver is dead: stop asking, it already scored the penalty.
+# Score = mean of the samples after dropping the slowest 20 % (outliers such as a
+# cold-cache miss, or a single stalled query). Three consecutive failures mean the
+# resolver is dead: stop asking, it already scored the penalty.
 bench_ip() {
 	_ip="$1"; _tmp="$TMP_DIR/samples"; : > "$_tmp"
 	_ok=0; _tot=0; _r=0; _dead=0
 	while [ "$_r" -lt "$SAMPLES" ] && [ "$_dead" = "0" ]; do
 		for _h in $HOSTS; do
-			_t0=$(now_ms)
-			ns_run "$_h" "$_ip" >/dev/null 2>&1
-			_rc=$?
-			if [ "$_rc" = "0" ]; then
+			if dns_query "$_h" "$_ip"; then
 				_ok=$((_ok+1))
 				_dead=0
-				_t1=$(now_ms)
-				if [ -n "$_t0" ] && [ -n "$_t1" ]; then
-					_ms=$((_t1 - _t0))
-					[ "$_ms" -lt 0 ] && _ms=0
-					echo "$_ms" >> "$_tmp"
-					_tot=$((_tot+1))
-				fi
+				echo "$Q_MS" >> "$_tmp"
 			else
 				echo "$TIMEOUT_PENALTY" >> "$_tmp"
 				_dead=$((_dead+1))
-				_tot=$((_tot+1))
 			fi
+			_tot=$((_tot+1))
 			[ "$_dead" -ge 3 ] && break
 		done
 		_r=$((_r+1))
@@ -338,6 +393,10 @@ resolve_profile() {
 
 # Tell the user when every successful query time falls on the same 10 ms step
 coarse_timer_note() {
+	# Only the nslookup path times the process with the coarse /proc/uptime
+	# clock; drill reports its own query time at 1 ms resolution, so the notice
+	# would be misleading there.
+	[ "$DNS_TOOL" = "nslookup" ] || return 0
 	[ -s "$TMP_DIR/all_samples" ] || return 0
 	if awk '$1<5000 {n++; r=$1%10; if (n==1) f=r; else if (r!=f) d=1} END{exit (n>=10 && !d) ? 0 : 1}' "$TMP_DIR/all_samples"; then
 		echo ""
@@ -474,7 +533,12 @@ apply_dns() { # dns1 dns2
 # (0 = not blocked, or Diversion not installed).
 diversion_probe() {
 	[ -d /opt/share/diversion ] || { echo 0; return 0; }
-	nslookup doubleclick.net 127.0.0.1 2>&1 | grep -c "0\.0\.0\.0"
+	if [ "$DNS_TOOL" = "drill" ]; then
+		"$TIMEOUT_BIN" "$QUERY_TIMEOUT" "$DRILL_BIN" doubleclick.net @127.0.0.1 2>/dev/null \
+			| grep -c "0\.0\.0\.0"
+	else
+		nslookup doubleclick.net 127.0.0.1 2>&1 | grep -c "0\.0\.0\.0"
+	fi
 	return 0
 }
 
@@ -486,7 +550,7 @@ diversion_probe() {
 cmd_run() {
 	MODE="$1"; FORCE="$2"; QUIET=0
 	[ "$MODE" = "auto" ] && QUIET=1
-	need_nslookup || return 1
+	pick_dns_tool || return 1
 	lock_acquire || { err "Another $SCRIPT_TITLE run is already in progress"; return 1; }
 	mkdir -p "$TMP_DIR"; rotate_log
 
@@ -585,7 +649,7 @@ EOF
 
 	# make sure the chosen servers really answer before touching anything
 	for _ip in "$NEW1" "$NEW2"; do
-		if ! ns_run google.com "$_ip" >/dev/null 2>&1; then
+		if ! dns_query google.com "$_ip"; then
 			err "$_ip does not resolve - aborting"
 			log_msg "$MODE: $_ip does not resolve - aborted"
 			return 1
@@ -615,6 +679,7 @@ cmd_status() {
 	echo "Auto mode   : $(cfg_get AUTO disabled) (schedule: $(cfg_get SCHEDULE '0 4 */3 * *'))"
 	echo "Profile     : $(cfg_get PROFILE auto)   Secondary: $(cfg_get DNS2_MODE auto)   Samples: $(cfg_get SAMPLES 5)"
 	echo "Thresholds  : >= $(cfg_get MIN_GAIN_MS 5) ms and >= $(cfg_get MIN_GAIN_PCT 15) %"
+	echo "Measuring   : $(measure_label)"
 	echo "amtmupdate  : $(cfg_get AMTMUPDATE enabled)"
 	if cru l 2>/dev/null | grep -q "#$CRON_ID#"; then echo "Cron job    : active"; else echo "Cron job    : not scheduled"; fi
 	[ -f "$STATE_FILE" ] && echo "Rollback    : available"
@@ -651,12 +716,27 @@ cmd_enable() {
 	cfg_set AUTO enabled
 	hook_add
 	cron_add
-	ok "Automatic mode enabled ($(cfg_get SCHEDULE '0 4 */3 * *'))"
+	# Verify instead of trusting: cru can fail silently on some builds, and a
+	# config that says "enabled" with no cron job means the automatic check will
+	# never run and nobody is told. Print progress too, because cru can take a
+	# few seconds on a busy crontab and the silence reads as a hang.
+	if cru l 2>/dev/null | grep -q "$CRON_ID"; then
+		ok "Automatic mode enabled ($(cfg_get SCHEDULE '0 4 */3 * *'))"
+	else
+		err "Auto mode is marked enabled but the cron job was NOT created."
+		err "Check it with:  cru l | grep $CRON_ID"
+		return 1
+	fi
 }
 
 cmd_disable() {
 	cfg_set AUTO disabled
 	cron_del
+	if cru l 2>/dev/null | grep -q "$CRON_ID"; then
+		warn "Auto mode is disabled but the cron job is still listed."
+		warn "Remove it with:  cru d $CRON_ID"
+		return 1
+	fi
 	ok "Automatic mode disabled"
 }
 
@@ -698,11 +778,23 @@ cmd_install() {
 		warn "(Enable JFFS custom scripts and configs = Yes), then reboot."
 	fi
 	cfg_init
-	need_nslookup || return 1
+	pick_dns_tool || return 1
 	migrate_legacy
 	hook_add
 	[ "$(cfg_get AUTO disabled)" = "enabled" ] && cron_add
 	ok "$SCRIPT_TITLE $SCRIPT_VERSION installed. Open the menu with: $RUN_CMD"
+}
+
+# Anything still on disk that mentions QuasarDNS. uninstall uses this to report
+# what it could not clean, instead of assuming the removal was complete.
+leftovers() {
+	_r=""
+	for _p in "$SCRIPT_PATH" "$ADDON_DIR" "$LOCK_DIR" "$SCRIPT_PATH.bak" "$HOOK_FILE.bak"; do
+		[ -e "$_p" ] && _r="$_r $_p"
+	done
+	grep -q "$HOOK_MARK" "$HOOK_FILE" 2>/dev/null && _r="$_r $HOOK_FILE:hook"
+	cru l 2>/dev/null | grep -qi "$CRON_ID" && _r="$_r cron:$CRON_ID"
+	printf '%s\n' "$_r" | tr ' ' '\n' | grep -v '^$'
 }
 
 cmd_uninstall() {
@@ -714,10 +806,21 @@ cmd_uninstall() {
 	fi
 	cron_del
 	hook_del
-	printf 'Also delete settings and logs (%s)? [y/N] ' "$ADDON_DIR"; read -r _a
-	case "$_a" in y|Y) rm -rf "$ADDON_DIR" ;; esac
+	# our own leftovers: the run lock, and a .bak of the startup hook if the
+	# file was ever edited by hand rather than by hook_del
+	rm -rf "$LOCK_DIR" 2>/dev/null
+	rm -f "$HOOK_FILE.bak" 2>/dev/null
+	printf 'Also delete settings, logs and backups (%s, *.bak)? [y/N] ' "$ADDON_DIR"; read -r _a
+	case "$_a" in y|Y) rm -rf "$ADDON_DIR"; rm -f "$SCRIPT_PATH.bak" ;; esac
 	rm -f "$SCRIPT_PATH"
-	ok "$SCRIPT_TITLE removed."
+	_left=$(leftovers)
+	if [ -n "$_left" ]; then
+		warn "Removed, but these are still on disk:"
+		printf '%s\n' "$_left" | sed 's/^/  /'
+		info "Check them with: grep -rli quasardns $JFFS_DIR/scripts $JFFS_DIR/addons"
+	else
+		ok "$SCRIPT_TITLE removed. Nothing left behind."
+	fi
 	exit 0
 }
 
@@ -849,6 +952,7 @@ menu_main() {
 		get_current_dns
 		echo "  Current DNS: $CUR_LABEL"
 		echo "  Auto mode  : $(cfg_get AUTO disabled)"
+		echo "  Measuring  : $(measure_label)"
 		echo ""
 		echo "  1) Run speed test (no changes)"
 		echo "  2) Apply the best DNS now"
