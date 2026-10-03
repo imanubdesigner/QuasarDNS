@@ -3,7 +3,13 @@
 # QuasarDNS installer for Asuswrt-Merlin
 #
 #   From a clone / zip :  sh install.sh
-#   One-liner          :  curl -fsL https://raw.githubusercontent.com/imanubdesigner/QuasarDNS/master/install.sh | sh
+#   Over SSH           :  curl -fsL -o /tmp/install.sh \
+#                          https://raw.githubusercontent.com/imanubdesigner/QuasarDNS/master/install.sh \
+#                        && sh /tmp/install.sh
+#
+# Download it to a file rather than piping it into `sh`: with `curl ... | sh`
+# the shell's stdin is the pipe, so the question below cannot be answered and
+# the automatic mode is left off without explanation.
 #
 # Run it from an interactive SSH session (ssh -t) to be asked about the
 # automatic mode. Without a terminal nothing is asked and nothing is changed:
@@ -66,8 +72,10 @@ sh "$DEST" install || abort "setup failed"
 DRILL=/opt/bin/drill
 TIMEOUT_BIN=/opt/bin/timeout
 if [ -x "$DRILL" ] && [ -x "$TIMEOUT_BIN" ]; then
+	MEASURE_OK=1
 	echo "Measurement: drill ($DRILL) + timeout — 1 ms resolution."
 else
+	MEASURE_OK=0
 	echo ""
 	echo "[!] Measurement dependencies missing: drill and/or coreutils-timeout."
 	echo "    QuasarDNS will still work, falling back to BusyBox nslookup, but that"
@@ -77,6 +85,7 @@ else
 	if [ -x /opt/bin/opkg ]; then
 		if ask "Install them now with opkg?" >/dev/null; then
 			if opkg update >/dev/null 2>&1 && opkg install drill coreutils-timeout >/dev/null 2>&1; then
+				MEASURE_OK=1
 				echo "[OK] Installed: measurement now uses drill."
 			else
 				echo "[X] opkg failed — continuing on the nslookup fallback."
@@ -107,7 +116,11 @@ else
 fi
 
 echo ""
-echo "Running a dry-run (no changes, about a minute with drill)..."
+if [ "$MEASURE_OK" = "1" ]; then
+	echo "Running a dry-run (no changes, about a minute with drill)..."
+else
+	echo "Running a dry-run (no changes, about two minutes on the nslookup fallback)..."
+fi
 sh "$DEST" --dry-run
 
 cat <<EOF
