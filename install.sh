@@ -5,6 +5,9 @@
 #   From a clone / zip :  sh install.sh
 #   One-liner          :  curl -fsL https://raw.githubusercontent.com/imanubdesigner/QuasarDNS/master/install.sh | sh
 #
+# Run it from an interactive SSH session (ssh -t) to be asked about the
+# automatic mode. Without a terminal nothing is asked and nothing is changed:
+# the installer only says what it would have done.
 
 REPO_RAW="https://raw.githubusercontent.com/imanubdesigner/QuasarDNS/master"
 JFFS_DIR="${QUASARDNS_JFFS:-/jffs}"
@@ -12,6 +15,22 @@ DEST="$JFFS_DIR/scripts/quasardns"
 TMP="/tmp/quasardns.install.$$"
 
 abort() { echo "[X] $*" >&2; rm -f "$TMP" "$DEST.new"; exit 1; }
+
+# A prompt is only useful when there is a terminal to read the answer from:
+# `ssh 'cmd'` without -t leaves stdin without a TTY, so read would hit EOF and
+# silently take the default. Detect that and say so instead of pretending to
+# ask. Only fd 0 is tested: ask() runs inside a command substitution, so its
+# stdout is a pipe and `[ -t 1 ]` would always fail.
+have_tty() { [ -t 0 ]; }
+
+ask() { # ask <question> -> echoes y or n on stdout
+	have_tty || return 1
+	# the prompt goes to stderr: stdout is the pipe of the command substitution
+	# this runs in, so printing there would prepend the question to the answer
+	printf '%s [y/N] ' "$1" >&2
+	read -r _ans
+	case "$_ans" in y|Y) echo y ;; *) echo n ;; esac
+}
 
 echo "=== QuasarDNS installer ==="
 mkdir -p "$JFFS_DIR/scripts" || abort "cannot create $JFFS_DIR/scripts"
@@ -41,25 +60,62 @@ echo "Installed to $DEST"
 # checks, hooks, migration from v1.x
 sh "$DEST" install || abort "setup failed"
 
-# optional: schedule the automatic check (only when a terminal is available)
-if grep -qs '^AUTO=enabled' "$JFFS_DIR/addons/quasardns.d/config"; then
-	echo "Automatic mode is already enabled: leaving it as it is."
+# Measurement dependency. Optional: without it QuasarDNS falls back to BusyBox
+# nslookup, which works but times whole processes with a 10 ms clock and adds
+# its own queries to the resolver under test, so the ranking is unreliable.
+DRILL=/opt/bin/drill
+TIMEOUT_BIN=/opt/bin/timeout
+if [ -x "$DRILL" ] && [ -x "$TIMEOUT_BIN" ]; then
+	echo "Measurement: drill ($DRILL) + timeout — 1 ms resolution."
 else
-	ans=n
-	if [ -r /dev/tty ]; then
-		printf '\nEnable automatic checks (every 3 days at 04:00, applies only when clearly faster)? [y/N] '
-		{ read -r ans < /dev/tty; } 2>/dev/null || ans=n
+	echo ""
+	echo "[!] Measurement dependencies missing: drill and/or coreutils-timeout."
+	echo "    QuasarDNS will still work, falling back to BusyBox nslookup, but that"
+	echo "    times whole processes with a 10 ms clock and issues extra queries to the"
+	echo "    resolver under test — enough to make the ranking unreliable."
+	echo "    Recommended:  opkg update && opkg install drill coreutils-timeout"
+	if [ -x /opt/bin/opkg ]; then
+		if ask "Install them now with opkg?" >/dev/null; then
+			if opkg update >/dev/null 2>&1 && opkg install drill coreutils-timeout >/dev/null 2>&1; then
+				echo "[OK] Installed: measurement now uses drill."
+			else
+				echo "[X] opkg failed — continuing on the nslookup fallback."
+			fi
+		else
+			echo "    Skipped. You can install them later with the command above."
+		fi
+	else
+		echo "    Entware (opkg) not found, so they cannot be installed automatically."
 	fi
-	case "$ans" in
-		y|Y) sh "$DEST" --enable ;;
-		*)   echo "Automatic mode is off. Turn it on any time from the menu (sh $DEST) or with: sh $DEST --enable" ;;
+fi
+
+# optional: schedule the automatic check
+if grep -qs '^AUTO=enabled' "$JFFS_DIR/addons/quasardns.d/config"; then
+	echo ""
+	echo "Automatic mode is already enabled: leaving it as it is."
+elif _a=$(ask "Enable automatic checks (every 3 days at 04:00, applies only when clearly faster)?"); then
+	echo ""
+	case "$_a" in
+		y) echo "Enabling automatic checks..."; sh "$DEST" --enable ;;
+		*) echo "Automatic mode is off. Turn it on any time with: sh $DEST --enable" ;;
 	esac
+else
+	echo ""
+	echo "Automatic mode is OFF (no terminal attached, so nothing was asked)."
+	echo "  turn it on with:   sh $DEST --enable"
+	echo "  look around first: sh $DEST          # interactive menu"
 fi
 
 echo ""
-echo "Running a dry-run (no changes, about 2 minutes)..."
+echo "Running a dry-run (no changes, about a minute with drill)..."
 sh "$DEST" --dry-run
 
-echo ""
-echo "Done. Open the menu with:  sh $DEST"
-echo "Apply the best DNS with:   sh $DEST --apply"
+cat <<EOF
+
+=== installed ===
+  menu        sh $DEST
+  try it      sh $DEST --dry-run     # benchmark, changes nothing
+  apply best  sh $DEST --apply
+  undo        sh $DEST --rollback
+  remove      sh $DEST uninstall
+EOF
