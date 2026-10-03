@@ -36,7 +36,7 @@ QuasarDNS measures with Entware's `drill` when present and falls back to BusyBox
 - [ ] `cat /tmp/resolv.dnsmasq` lists **both** new servers (the old ones are gone) and `nvram get wan0_dns` shows the same list
 - [ ] From a LAN client: `nslookup example.com <router-ip>` works
 - [ ] WebUI → WAN → DNS Server shows the new servers with *Connect to DNS Server automatically = No*
-- [ ] Diversion users: `[OK] Diversion is still blocking` (or the `[i]` note explains why not)
+- [ ] Diversion users: three possible outcomes, and **silence is one of them**. QuasarDNS probes `doubleclick.net` before and after, and only speaks up when blocking that worked before the change stopped working. Check which case you are in with `/opt/bin/drill doubleclick.net @127.0.0.1 | grep -c '0\.0\.0\.0'`: if it was **0 before** the change there is nothing to compare and QuasarDNS says nothing at all; if it was **>0 before** you must get either `[OK] Diversion is still blocking` or `[!] Diversion was blocking doubleclick.net before the change and is not now`, and a missing line here is a bug
 - [ ] The WAN connection did not drop (no WAN restart is performed)
 
 ## 4. Rollback
